@@ -1,60 +1,67 @@
+import axios from "axios";
+
 export default async function handler(req, res) {
+  // Sirf POST allow karein
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method Not Allowed" });
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const { amount, orderId } = req.body;
+
+  // Basic validation
+  if (!amount || !orderId) {
+    return res
+      .status(400)
+      .json({ error: "amount and orderId are required" });
   }
 
   try {
-    const { amount, orderId } = req.body;
-
-    if (!amount || !orderId) {
-      return res.status(400).json({ error: "Amount & orderId are required" });
-    }
-
-    // 🟢 Your AIK Digital Merchant Keys
-    const MERCHANT_ID = process.env.AIK_MERCHANT_ID;
-    const API_KEY = process.env.AIK_API_KEY;
-
-    if (!MERCHANT_ID || !API_KEY) {
-      return res.status(500).json({ error: "AIK credentials missing" });
-    }
-
-    // 🟢 CALL AIK PAY API TO CREATE PAYMENT
-    const aikResponse = await fetch("https://aikpay.pk/api/payment/initiate", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "API-KEY": API_KEY
+    // AIK Digital MerchantQR API call
+    const aikResponse = await axios.post(
+      `${process.env.AIK_BASE_URL}/api/QR/MerchantQR`,
+      {
+        Amount: amount,
+        OrderId: orderId,
+        Call_back_URL: process.env.CALLBACK_URL,
       },
-      body: JSON.stringify({
-        merchant_id: MERCHANT_ID,
-        order_id: orderId,
-        amount: amount,
-        callback_url: "https://kahani47.com/aik-callback", // Change to your domain
-      })
-    });
+      {
+        headers: {
+          CustomerMobile: process.env.CUSTOMER_MOBILE,
+          API_KEY: process.env.AIK_API_KEY,
+          SECRET: process.env.AIK_SECRET,
+        },
+      }
+    );
 
-    const data = await aikResponse.json();
-    console.log("AIK Response:", data);
+    const data = aikResponse.data;
 
-    // 🧨 AIK API error handling
-    if (!aikResponse.ok || !data?.qr_text) {
+    // Normally qrText body ke andar hota hai
+    const qrText = data?.body?.qrText || data?.qrText;
+
+    if (!qrText) {
       return res.status(500).json({
-        error: "AIK Payment Error",
-        details: data
+        success: false,
+        error: "QR text not found in AIK response",
+        raw: data,
       });
     }
 
-    // 🟢 FRONTEND EXPECTS THIS KEY!
+    // Frontend ko qrText bhej dein
     return res.status(200).json({
-      qrText: data.qr_text
+      success: true,
+      qrText,
+      aikRaw: data,
     });
-
   } catch (error) {
-    console.error("AIK BACKEND ERROR:", error);
+    console.error(
+      "AIK create QR error:",
+      error.response?.data || error.message
+    );
 
     return res.status(500).json({
-      error: "Server Error",
-      details: error.message
+      success: false,
+      error: "Failed to create AIK QR",
+      details: error.response?.data || error.message,
     });
   }
 }
