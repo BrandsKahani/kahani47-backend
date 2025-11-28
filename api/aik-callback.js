@@ -1,9 +1,8 @@
+// api/aik-callback.js
 import axios from "axios";
 
 export default async function handler(req, res) {
-  // =============================
-  // CORS HEADERS (for browser tests)
-  // =============================
+  // CORS (useful if you hit this from browser for testing)
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -11,14 +10,10 @@ export default async function handler(req, res) {
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
-  // =============================
 
-  // Simple GET check in browser
+  // Simple ping
   if (req.method === "GET") {
-    return res.status(200).json({
-      status: "ok",
-      message: "AIK callback endpoint is live. Use POST for AIK webhook.",
-    });
+    return res.status(200).json({ status: "ok", message: "AIK callback live" });
   }
 
   if (req.method !== "POST") {
@@ -27,25 +22,30 @@ export default async function handler(req, res) {
 
   try {
     const { responseCode, responseMessage, traceId, body } = req.body || {};
-
-    console.log("AIK callback received:", req.body);
+    console.log("AIK callback body:", req.body);
 
     if (responseCode !== "00" || responseMessage !== "Paid") {
-      console.log("Payment not completed, ignoring.");
-      return res.status(200).json({ status: "ignored", reason: "not paid" });
+      return res.status(200).json({
+        status: "ignored",
+        reason: "Payment not marked as Paid by AIK",
+      });
     }
 
     const amountRaw = body?.Amount || body?.amount;
     if (!amountRaw) {
-      console.error("No amount in AIK callback body:", body);
-      return res.status(400).json({ error: "Missing amount in callback body" });
+      return res.status(400).json({ error: "Missing Amount in callback body" });
     }
 
-    const amount = Number(amountRaw).toFixed(2); // "2500.00"
+    const amount = Number(amountRaw).toFixed(2);
 
-    const shopifyDomain = process.env.SHOPIFY_STORE_DOMAIN; // e.g. kahani47.myshopify.com
+    if (!process.env.SHOPIFY_STORE_DOMAIN || !process.env.SHOPIFY_TOKEN) {
+      return res.status(500).json({
+        error: "SHOPIFY_STORE_DOMAIN or SHOPIFY_TOKEN not set in env",
+      });
+    }
+
     const apiVersion = process.env.SHOPIFY_API_VERSION || "2024-01";
-    const shopifyUrl = https://${shopifyDomain}/admin/api/${apiVersion}/orders.json;
+    const shopifyUrl = https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/${apiVersion}/orders.json;
 
     const orderPayload = {
       order: {
@@ -69,13 +69,10 @@ export default async function handler(req, res) {
       },
     });
 
-    console.log("Shopify order created successfully from AIK callback.");
+    console.log("Shopify order created from AIK callback.");
     return res.status(200).json({ success: true });
   } catch (err) {
-    console.error(
-      "AIK callback error:",
-      err.response?.data || err.message || err
-    );
+    console.error("aik-callback error:", err.response?.data || err.message || err);
     return res.status(500).json({ error: "Callback failed" });
   }
 }
